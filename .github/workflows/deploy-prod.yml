@@ -54,7 +54,8 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile --prod
+      # サーバへはフォルダごと送るので、シンボリックリンクの無い平らな node_modules にする（pnpm の既定だと SDK の依存が送れない）
+      - run: pnpm install --frozen-lockfile --prod --config.node-linker=hoisted
 
       - name: Check syntax
         run: |
@@ -66,7 +67,8 @@ jobs:
           set -euo pipefail
           mkdir -p _deploy
           cp -r server.mjs prompt.md package.json lib public _deploy/
-          cp -RL node_modules _deploy/node_modules
+          cp -r node_modules _deploy/node_modules
+          node -e "import('./_deploy/node_modules/@anthropic-ai/sdk/index.mjs').then(() => console.log('sdk ok'))"
 
       - name: Setup SSH
         run: |
