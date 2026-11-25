@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>顧客ボイス ペルソナに声で聞く | INSTYLE GROUP</title>
+<meta name="description" content="擬似顧客ペルソナにマイクで質問し、選んだ理由をずんだもんの声で聞くローカルツール">
+<meta name="robots" content="noindex, nofollow">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="INSTYLE GROUP">
+<meta property="og:title" content="顧客ボイス ペルソナに声で聞く | INSTYLE GROUP">
+<meta property="og:description" content="擬似顧客ペルソナにマイクで質問し、選んだ理由をずんだもんの声で聞くローカルツール">
+<meta property="og:image" content="https://app.instyle.group/_shared/static/ogp.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="ja_JP">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="https://app.instyle.group/_shared/static/favicon.png">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gen-interface-jp@0.5.0/all.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.2/src/regular/style.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="scene-bg"></div>
+
+<div class="layout">
+  <aside class="glass-panel side">
+    <p class="eyebrow">Customer Voice</p>
+    <h1>顧客ボイス</h1>
+    <p class="lede">ペルソナに声で質問すると、選んだものと理由を顧客の言葉で返します。</p>
+
+    <div class="row-head">
+      <p class="eyebrow">ペルソナ</p>
+      <button type="button" id="add-persona" class="btn btn-secondary btn-xs"><i class="ph ph-plus"></i>追加</button>
+    </div>
+    <div class="segmented" data-group="mode" role="radiogroup" aria-label="聞き方">
+      <button type="button" data-mode="single" class="is-active" role="radio" aria-checked="true">1 人に聞く</button>
+      <button type="button" data-mode="panel" role="radio" aria-checked="false">パネルで聞く</button>
+    </div>
+    <div id="panel-note" class="panel-note" hidden>
+      <p><strong id="panel-count">0 人</strong>を選択中（2〜8 人）。タップで入れ替え。</p>
+      <p>構成比（実際の顧客のうち何割がこの人に近いか）を全員に入れると、その比率で集計します。空なら 1 人 1 票です。</p>
+    </div>
+    <div id="personas" class="persona-list" role="radiogroup" aria-label="ペルソナ"></div>
+
+    <p class="eyebrow">口調</p>
+    <div class="segmented" data-group="style" role="radiogroup" aria-label="口調">
+      <button type="button" data-style="persona" class="is-active" role="radio" aria-checked="true">ペルソナの口調</button>
+      <button type="button" data-style="zundamon" role="radio" aria-checked="false">ずんだもん</button>
+    </div>
+
+    <div class="status">
+      <span id="vv-status" class="badge voice-only"><i class="ph ph-speaker-high"></i>VOICEVOX 確認中</span>
+      <label class="toggle voice-only"><input id="auto-speak" type="checkbox" checked> 自動で読み上げ</label>
+      <label class="toggle" title="同じ質問を 5 回並列で聞き、多数決の答えを返します。割れ具合も表示します"><input id="precise" type="checkbox" checked> 5 回聞いて多数決</label>
+    </div>
+    <button type="button" id="reset" class="btn btn-secondary btn-sm"><i class="ph ph-arrow-counter-clockwise"></i>会話をリセット</button>
+  </aside>
+
+  <main class="glass-panel main">
+    <div id="log" class="log" aria-live="polite">
+      <div class="empty">
+        <i class="ph ph-microphone"></i>
+        <p>マイクを押して話しかけてください。</p>
+        <p class="hint">例：「ヒアルロン酸とプラセンタ、どっちが入ってたら買う？」</p>
+      </div>
+    </div>
+
+    <form id="composer" class="composer">
+      <button type="button" id="mic" class="mic" aria-label="マイクで話す"><i class="ph ph-microphone"></i></button>
+      <input id="question" type="text" autocomplete="off" placeholder="話すか、ここに入力して Enter">
+      <button type="submit" class="btn btn-primary" id="send"><i class="ph ph-paper-plane-right"></i>聞く</button>
+    </form>
+    <p id="mic-note" class="mic-note"></p>
+  </main>
+</div>
+
+<div id="profile-pop" class="profile-pop" role="tooltip" hidden></div>
+
+<dialog id="editor" class="editor">
+  <form method="dialog" class="editor-inner" id="editor-form">
+    <p class="eyebrow" id="editor-eyebrow">ペルソナを追加</p>
+    <h2 id="editor-title">どんな人ですか？</h2>
+
+    <div id="quick-area" class="quick">
+      <p class="hint">選ぶだけで作れます。空いたところは AI が補って「（仮）」を付けます。「30〜40 代女性」のような集団ではなく、1 人の人として作ります。</p>
+      <div class="q-row">
+        <span class="field-label">領域</span>
+        <div class="chips" data-field="domain" role="radiogroup" aria-label="領域">
+          <button type="button" data-v="cosme">コスメ</button>
+          <button type="button" data-v="food">食</button>
+          <button type="button" data-v="fashion">ファッション</button>
+          <button type="button" data-v="recruit">採用</button>
+        </div>
+      </div>
+      <div class="q-row">
+        <span class="field-label">性別</span>
+        <div class="chips" data-field="gender" role="radiogroup" aria-label="性別">
+          <button type="button" data-v="女性">女性</button>
+          <button type="button" data-v="男性">男性</button>
+        </div>
+      </div>
+      <div class="q-row">
+        <label class="field-label" for="q-age">年齢</label>
+        <div class="age"><input id="q-age" type="number" inputmode="numeric" min="15" max="90" placeholder="38"><span>歳</span></div>
+      </div>
+      <div class="q-row">
+        <span class="field-label">段階</span>
+        <div class="chips" data-field="pyramid" role="radiogroup" aria-label="段階">
+          <button type="button" data-v="未認知">知らない</button>
+          <button type="button" data-v="認知・未購買">知ってるが未購入</button>
+          <button type="button" data-v="一般">買ったことがある</button>
+          <button type="button" data-v="ロイヤル">リピーター</button>
+          <button type="button" data-v="離反">離れた</button>
+        </div>
+      </div>
+      <div class="q-row q-memo">
+        <label class="field-label" for="draft-input">ひとこと</label>
+        <div class="memo">
+          <textarea id="draft-input" rows="2" placeholder="例：仕事と家庭で忙しい。肌の変化は感じるが手間はかけたくない"></textarea>
+          <button type="button" id="draft-mic" class="icon-btn memo-mic" aria-label="声で入力" title="声で入力"><i class="ph ph-microphone"></i></button>
+        </div>
+      </div>
+      <div class="q-row q-memo">
+        <label class="field-label" for="facts-input">事実</label>
+        <textarea id="facts-input" rows="3" placeholder="購買データ・インタビュー・レビュー・問い合わせを貼り付け（任意）。例：定期購入者の 7 割が 50〜60 代。52 歳の定期購入者「毎朝迷わなくて済むのがいい」"></textarea>
+      </div>
+      <p class="hint">精度は「事実」で決まります。事実から書いた項目は（仮）が外れ、AI の補完だけの項目は（仮）のまま残ります。</p>
+    </div>
+
+    <div id="preview" class="preview" hidden></div>
+
+    <details id="md-details">
+      <summary>Markdown で直す</summary>
+      <textarea id="persona-md" rows="16" spellcheck="false" aria-label="ペルソナの中身（Markdown）"></textarea>
+    </details>
+
+    <p id="editor-msg" class="editor-msg" role="status"></p>
+    <p class="hint local-only">保存先：自分用（<code>Workspace/_outputs/customer-panel/personas/</code>）。文章版の customer-panel からも使えます。</p>
+    <p class="hint team-only">保存先：チーム版のサーバ。ここで作ったペルソナはチーム全員に見えます。クライアントの実名や未公開の数字は書かないでください。</p>
+    <div class="editor-actions">
+      <button type="button" id="editor-cancel" class="btn btn-secondary">閉じる</button>
+      <button type="button" id="draft-btn" class="btn btn-secondary"><i class="ph ph-sparkle"></i><span>作る</span></button>
+      <button type="button" id="editor-save" class="btn btn-primary" hidden><i class="ph ph-chat-circle-text"></i><span>保存して話す</span></button>
+    </div>
+  </form>
+</dialog>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
