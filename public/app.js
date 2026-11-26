@@ -73,7 +73,16 @@ async function loadPersonas(keepSlug = state.persona) {
   state.personas = await res.json();
   const box = $("#personas");
   box.textContent = "";
+  let lastGroup = null;
   for (const p of state.personas) {
+    // 見出し: ブランド顧客は group 名（例: メビウス製薬）、それ以外は置き場所
+    const group = p.group || (p.source === "shared" ? "共有（設計ペルソナ）" : state.team ? "チーム作成" : "自分用");
+    if (group !== lastGroup) {
+      const head = h("div", "p-group", group);
+      head.setAttribute("role", "presentation");
+      box.appendChild(head);
+      lastGroup = group;
+    }
     const item = h("div", "persona");
     item.tabIndex = 0;
     const check = document.createElement("i");
@@ -83,8 +92,10 @@ async function loadPersonas(keepSlug = state.persona) {
     item.dataset.slug = p.slug;
     const text = h("div", "p-text");
     const name = h("span", "p-name", p.name);
-    if (p.source === "own") name.appendChild(h("span", "p-own", state.team ? "チーム作成" : "自分用"));
-    text.append(name, h("span", "p-meta", p.who), h("span", "p-meta", p.job));
+    if (p.critical) name.appendChild(h("span", "p-badge", "主力"));
+    text.append(name);
+    if (p.brand || p.segment) text.appendChild(h("span", "p-seg", [p.brand, p.segment].filter(Boolean).join("・")));
+    text.append(h("span", "p-meta", p.who), h("span", "p-meta", p.job));
     if (p.source === "own" && p.items) text.appendChild(h("span", "p-ground", groundLabel(p)));
     const weight = h("label", "p-weight");
     const wi = document.createElement("input");
@@ -151,10 +162,11 @@ function setMode(mode) {
     b.setAttribute("aria-checked", String(on));
   });
   if (mode === "panel" && !state.panel.size) {
-    // 最初は、いま選んでいる人と同じ領域の人をまとめて入れる
+    // 最初は、いま選んでいる人と同じグループ（例: メビウス製薬の顧客）、グループが無ければ同じ領域の人をまとめて入れる
     const cur = currentPersona();
     const domain = cur?.domains?.[0];
-    state.panel = new Set(state.personas.filter((p) => !domain || p.domains.includes(domain)).slice(0, PANEL_MAX).map((p) => p.slug));
+    const same = cur?.group ? (p) => p.group === cur.group : (p) => !domain || p.domains.includes(domain);
+    state.panel = new Set(state.personas.filter(same).slice(0, PANEL_MAX).map((p) => p.slug));
     if (cur) state.panel.add(cur.slug);
   }
   resetLog();
@@ -464,13 +476,22 @@ function append(el) {
   return el;
 }
 
-function renderNote(text) {
+/** 根拠タグを札にする。[市場: N3] は朝報の記事へのリンクにする（news = 回答で使われた記事） */
+function renderNote(text, news = []) {
   const li = document.createElement("li");
-  const re = /\[(前提|属性|行動|段階)(（仮）)?[:：][^\]]*\]/g;
+  const re = /\[(前提|属性|行動|段階|市場)(（仮）)?[:：][^\]]*\]/g;
   let last = 0;
   for (const m of text.matchAll(re)) {
     if (m.index > last) li.appendChild(setText(document.createElement("span"), text.slice(last, m.index)));
-    li.appendChild(h("span", m[2] ? "tag is-tentative" : "tag", m[0].slice(1, -1)));
+    const item = m[1] === "市場" ? news.find((n) => new RegExp(`\\b${n.id}\\b`).test(m[0])) : null;
+    if (item) {
+      const a = h("a", "tag is-news", `朝報 ${item.date.slice(5).replace("-", "/")} ${item.media}`);
+      a.href = item.url;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.title = item.title;
+      li.appendChild(a);
+    } else li.appendChild(h("span", m[2] ? "tag is-tentative" : "tag", m[0].slice(1, -1)));
     last = m.index + m[0].length;
   }
   if (last < text.length) li.appendChild(setText(document.createElement("span"), text.slice(last)));
@@ -489,18 +510,77 @@ function renderAnswer(ans) {
   replay.append(ri, document.createTextNode("もう一度聞く"));
   replay.addEventListener("click", () => speak(ans.spoken));
   head.appendChild(replay);
-  card.append(head, h("p", "choice", ans.choice));
+  card.append(head, h("p", "choice", ans.choice), stanceChip(ans.stance));
+  const flag = criticalFlag(p ? [{ ...p, stance: ans.stance }] : []);
+  if (flag) card.appendChild(flag);
   if (ans.vote && ans.vote.total > 1) card.appendChild(renderVote(ans.vote));
   card.appendChild(h("p", "spoken", ans.spoken));
   if (ans.marketing_note.length) {
     const note = h("div", "note");
     note.appendChild(h("p", "eyebrow", "マーケ目線の理由"));
     const ul = document.createElement("ul");
-    ans.marketing_note.forEach((n) => ul.appendChild(renderNote(n)));
+    ans.marketing_note.forEach((n) => ul.appendChild(renderNote(n, ans.news)));
     note.appendChild(ul);
     card.appendChild(note);
   }
+  const src = renderNewsSources(ans);
+  if (src) card.appendChild(src);
   append(card);
+}
+
+// ---------- 化粧品ニュース朝報（市場の根拠） ----------
+/** 回答が根拠に使った朝報の記事一覧。読めなかったときはその旨を出す（根拠なしで答えたことを隠さない） */
+function renderNewsSources(body) {
+  const st = body.newsStatus;
+  if (!st?.enabled) return null;
+  const box = h("div", "news-src");
+  if (st.error && !st.total) {
+    box.appendChild(h("p", "r-flag", `化粧品ニュース朝報を読めなかったため、業界の動きは踏まえていません（${st.error}）`));
+    return box;
+  }
+  if (!body.news?.length) {
+    box.appendChild(h("p", "news-none", st.picked ? `化粧品ニュース朝報から近い記事を ${st.picked} 件渡しましたが、根拠には使われませんでした` : "化粧品ニュース朝報に、この質問に近い記事はありませんでした"));
+    return box;
+  }
+  box.appendChild(h("p", "eyebrow", "根拠にした化粧品ニュース朝報"));
+  const ul = document.createElement("ul");
+  for (const n of body.news) {
+    const li = document.createElement("li");
+    const a = h("a", null, n.title);
+    a.href = n.url;
+    a.target = "_blank";
+    a.rel = "noopener";
+    li.append(h("span", "news-meta", `${n.date} ${n.media}`), a);
+    ul.appendChild(li);
+  }
+  box.appendChild(ul);
+  return box;
+}
+
+// ---------- 気持ちの向き・主力顧客 ----------
+const STANCE_LABEL = { positive: "前向き", conditional: "条件しだい", negative: "後ろ向き" };
+function stanceChip(stance) {
+  return h("span", `stance is-${stance}`, STANCE_LABEL[stance] ?? stance);
+}
+function segLabel(p) {
+  return [p.brand, p.segment].filter(Boolean).join("・") || p.name;
+}
+/**
+ * 主力顧客（critical）の反応から、企画・施策がクリティカルかを出す。
+ * 1 人でも後ろ向きならクリティカル、条件しだいなら要注意、全員前向きなら OK。主力顧客がいなければ何も出さない
+ */
+function criticalFlag(people) {
+  const core = people.filter((p) => p.critical);
+  if (!core.length) return null;
+  const neg = core.filter((p) => p.stance === "negative");
+  const cond = core.filter((p) => p.stance === "conditional");
+  const names = (list) => list.map((p) => `${p.name}（${segLabel(p)}）`).join("、");
+  const [level, text] = neg.length
+    ? ["is-critical", `クリティカル：主力顧客の ${names(neg)} が後ろ向きです。今の売上の土台を削るおそれがあります`]
+    : cond.length
+      ? ["is-caution", `要注意：主力顧客の ${names(cond)} は条件しだいです。条件を満たせないと離れるおそれがあります`]
+      : ["is-ok", `主力顧客の ${names(core)} は前向きです`];
+  return h("p", `critical-flag ${level}`, text);
 }
 
 /** 「5 回中 4 回：プラセンタ ／ 1 回：ヒアルロン酸」と割合バー。6 割以下なら「割れている」 */
@@ -612,7 +692,9 @@ const pct = (x) => `${Math.round(x * 100)}%`;
 function panelSpeech(body) {
   const n = body.summary.people;
   const parts = body.summary.counts.map((c) => (body.weighted ? `${c.label}が${Math.round(c.share * 100)}パーセント` : `${c.label}が${c.people}人`));
-  return `${n}人に聞きました。${body.weighted ? "構成比で見ると、" : ""}${parts.join("、")}です。`;
+  const core = body.results.filter((r) => r.critical);
+  const coreText = core.some((r) => r.stance === "negative") ? "主力のお客さんが後ろ向きです。" : core.some((r) => r.stance === "conditional") ? "主力のお客さんは条件しだいです。" : "";
+  return `${n}人に聞きました。${body.weighted ? "構成比で見ると、" : ""}${parts.join("、")}です。${coreText}`;
 }
 
 function renderPanel(body) {
@@ -648,6 +730,8 @@ function renderPanel(body) {
   });
   sum.append(bar, legend);
   card.appendChild(sum);
+  const flag = criticalFlag(body.results);
+  if (flag) card.appendChild(flag);
 
   // 割合の信頼度に関わる注意（設計ペルソナ・仮の多い人・票が割れた人）
   const shared = body.results.filter((r) => r.source === "shared").length;
@@ -667,15 +751,16 @@ function renderPanel(body) {
     const row = h("div", "panel-row");
     const top = h("div", "row-top");
     top.append(
-      h("span", "r-name", r.name),
-      h("span", "r-meta", [r.who, body.weighted && `構成比 ${pct(r.weight)}`, r.source === "shared" ? "共有・設計" : r.items ? groundLabel(r) : ""].filter(Boolean).join(" ／ ")),
+      h("span", "r-name", r.critical ? `${r.name}・主力` : r.name),
+      h("span", "r-meta", [r.brand || r.segment ? segLabel(r) : "", r.who, body.weighted && `構成比 ${pct(r.weight)}`, r.source === "shared" ? "共有・設計" : r.items ? groundLabel(r) : ""].filter(Boolean).join(" ／ ")),
       h("span", "r-choice", `→ ${r.choice}`),
+      stanceChip(r.stance),
       h("span", "r-meta", r.vote.total > 1 ? `${r.vote.total} 回中 ${r.vote.counts[0].n} 回` : "")
     );
     const det = document.createElement("details");
     det.appendChild(h("summary", null, "マーケ目線の理由"));
     const ul = document.createElement("ul");
-    r.marketing_note.forEach((n) => ul.appendChild(renderNote(n)));
+    r.marketing_note.forEach((n) => ul.appendChild(renderNote(n, body.news)));
     det.appendChild(ul);
     const play = h("button", "btn btn-secondary replay");
     play.type = "button";
@@ -687,6 +772,8 @@ function renderPanel(body) {
     rows.appendChild(row);
   }
   card.appendChild(rows);
+  const src = renderNewsSources(body);
+  if (src) card.appendChild(src);
   append(card);
 }
 

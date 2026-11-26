@@ -100,8 +100,11 @@ h1, p, li, .spoken, .lede { word-break: keep-all; overflow-wrap: anywhere; }
 .persona .p-meta { font-size: 11px; color: var(--color-text-muted); display: block; line-height: 1.5; }
 .persona { display: flex; gap: 8px; align-items: flex-start; }
 .persona .p-text { flex: 1; min-width: 0; }
-.persona .p-own { font-size: 10px; font-weight: 700; letter-spacing: .06em; color: var(--color-info); margin-left: 6px; }
-.persona.is-active .p-own { color: var(--color-text-light); }
+.p-group { font-size: 10px; font-weight: 700; letter-spacing: .12em; color: var(--color-text-muted); margin: 8px 0 -2px 4px; }
+.p-group:first-child { margin-top: 0; }
+.persona .p-badge { font-size: 10px; font-weight: 700; letter-spacing: .06em; color: var(--color-info); margin-left: 6px; }
+.persona .p-seg { font-size: 11px; font-weight: 600; color: var(--color-info); display: block; line-height: 1.5; }
+.persona.is-active .p-badge, .persona.is-active .p-seg { color: var(--color-text-light); }
 .persona .p-actions { display: flex; gap: 2px; opacity: 0; transition: opacity var(--ease-out); }
 .persona:hover .p-actions, .persona:focus-within .p-actions, .persona.is-active .p-actions { opacity: 1; }
 .icon-btn {
@@ -341,3 +344,22 @@ h1, p, li, .spoken, .lede { word-break: keep-all; overflow-wrap: anywhere; }
 .team-only { display: none; }
 .is-team .team-only { display: block; }
 .is-team .local-only { display: none; }
+
+/* 気持ちの向き（前向き / 条件しだい / 後ろ向き）と、主力顧客から見たクリティカル判定 */
+.stance { align-self: flex-start; display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .06em; border-radius: var(--r-pill); padding: 2px 8px; box-shadow: inset 0 0 0 1px currentColor; }
+.stance.is-positive { color: var(--color-success); }
+.stance.is-conditional { color: var(--color-warning); }
+.stance.is-negative { color: var(--color-error); }
+.critical-flag { margin: 8px 0 0; font-size: 12px; font-weight: 700; border-radius: var(--r); padding: 8px 12px; background: var(--glass-light); }
+.critical-flag.is-critical { color: var(--color-error); box-shadow: inset 3px 0 0 var(--color-error); }
+.critical-flag.is-caution { color: var(--color-warning); box-shadow: inset 3px 0 0 var(--color-warning); }
+.critical-flag.is-ok { color: var(--color-text-muted); box-shadow: inset 3px 0 0 var(--color-success); }
+
+/* 化粧品ニュース朝報（市場の根拠） */
+a.tag.is-news { color: var(--color-info); text-decoration: none; box-shadow: inset 0 0 0 1px var(--color-info); background: transparent; }
+a.tag.is-news:hover { background: rgba(63,86,128,.08); }
+.news-src { margin-top: 8px; font-size: 12px; }
+.news-src ul { margin: 4px 0 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; }
+.news-src a { color: var(--color-info); }
+.news-src .news-meta { color: var(--color-text-muted); font-size: 11px; margin-right: 8px; }
+.news-src .news-none { margin: 0; font-size: 11px; color: var(--color-text-muted); }

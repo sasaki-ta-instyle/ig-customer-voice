@@ -23,7 +23,7 @@
 
 - 設定は `ecosystem.config.cjs`（CV_LLM=api / CV_VOICE=off / CV_BASE_PATH）。秘密の値（`ANTHROPIC_API_KEY` / `CV_PASSWORD`）はサーバの `/var/www/_shared/apps/mb-ig-customer-voice.env` だけに置き、リポジトリに入れない
 - `CV_LLM=api` なのに `ANTHROPIC_API_KEY` か `CV_PASSWORD` が無いと起動しない（公開のまま動かさない）
-- ペルソナはリリースをまたいで `/var/www/mb/ig-customer-voice/shared/personas/` に置く。`shared/` = customer-panel 同梱の共有ペルソナ（`scripts/sync-personas.sh` で配る。sasaki の自分用は送らない）、`own/` = チームが画面で作ったもの
+- ペルソナはリリースをまたいで `/var/www/mb/ig-customer-voice/shared/personas/` に置く。`shared/` = customer-panel 同梱の共有ペルソナ、`brand/` = sasaki の自分用のうち `group:` 付きのブランド顧客（どちらも `scripts/sync-personas.sh` で配り、画面からは読むだけ。group の無い自分用は送らない）、`own/` = チームが画面で作ったもの
 - デプロイは `gh workflow run deploy-prod.yml --ref main`（Next.js ではないのでビルドせず、依存だけ入れて送る）
 - 費用の目安（Claude Sonnet 5.5・effort low）: 1 人に 5 回の多数決で 1 問 数円〜十数円、8 人パネルで 1 問 数十円〜百円程度。API キーは mebius 系アプリと同じものを使う
 
@@ -39,6 +39,9 @@ server.mjs（依存なし・127.0.0.1 のみ）
    └─ lib/voicevox.mjs    localhost:50021 → wav（speaker 3 = ずんだもん / speed 1.35）
 ```
 
+- **既定の顧客はメビウス製薬の 3 ブランド**（SIMIUS 新規 / SIMIUS 既存定期 / TRIPURE / UPTIS の 4 人）。ペルソナ先頭の設定に `group: メビウス製薬` と `brand` / `segment` / `order` を書くと、一覧の先頭にまとまり、起動時はその 1 人目が選ばれ、「パネルで聞く」も同じ group の全員から始まる。SIMIUS を新規と既存定期に分けるのは、同じブランドでも「これから買う人」と「今の売上を支えている人」で、企画・施策への反応の重みが違うため
+- **主力顧客とクリティカル判定**: `critical: true` のペルソナ（SIMIUS 既存定期）は「この人に嫌がられる企画・施策は今の売上の土台を削る」人。回答には選んだものとは別に気持ちの向き `stance`（前向き / 条件しだい / 後ろ向き。定期を続ける気持ちの変化も含む。`prompt.md`）を出させ、5 回の多数決で同数なら悪いほうを取る。主力顧客が後ろ向きなら「クリティカル」、条件しだいなら「要注意」を、1 人に聞いたときもパネルでも画面に出す。新規の反応が良くても主力顧客が後ろ向きなら、その案は既存の定期を削ってまで取りに行く価値があるかを先に判断する、という使い方
+- **化粧品ニュース朝報を市場の根拠にする**（`lib/news.mjs`）: シロコが平日朝に Slack #ms_cpc へ流す業界ダイジェスト（mb-cosme-news が生成し、GitHub `sasaki-ta-instyle/mb-cosme-news` の `state/trends/YYYY-MM.md` に追記される）を直近 3 か月分読み、質問に近い記事を最大 6 件だけ回答 AI に渡す（文字の 2 字の重なりを、どの記事にも出る 2 字ほど軽く数えて選ぶ）。marketing_note は他社施策・トレンドとの比較に `[市場: N3]` を付け、画面では記事へのリンクになる。顧客役が「見た」と言ってよいのは、そのペルソナの情報源に入る一般向け媒体の記事だけ（業界紙は作り手側の情報なので知らない扱い）。朝報は 1 日最大 5 件の抜粋なので「記事が無い＝他社はやっていない」とは読まない。取得は 1 時間キャッシュ、読めないときは回答を止めずに画面へ「朝報を読めなかった」と出す。パネルは全員に同じ記事を渡す（人ごとに市場の前提を変えない）
 - ペルソナの置き場所は 2 つ（`lib/personas.mjs`）。どちらもこのフォルダにはコピーせず、毎回ファイルを読む
   - **共有**: `~/.claude/skills/customer-panel/personas/`。チーム配布物なので、この画面からは読むだけ（編集・削除不可）
   - **自分用**: `~/Workspace/_outputs/customer-panel/personas/`。画面から追加・編集・削除できる。customer-panel を Workspace で使うときの「案件専用ペルソナ」の置き場と同じなので、文章版のパネルからも使える。クライアント名を入れてよいのはこちらだけ
@@ -62,6 +65,9 @@ server.mjs（依存なし・127.0.0.1 のみ）
 | `CV_SPEAKER` / `CV_SPEED` | 3 / 1.35 | VOICEVOX の話者と速さ |
 | `CV_PERSONA_DIR` | customer-panel/personas | 共有ペルソナの置き場 |
 | `CV_OWN_PERSONA_DIR` | `_outputs/customer-panel/personas` | 画面で作るペルソナの置き場 |
+| `CV_BRAND_PERSONA_DIR` | （空） | チーム版だけ。配布したブランド顧客の置き場（読むだけ） |
+| `CV_NEWS` | on | `off` で化粧品ニュース朝報を使わない |
+| `CV_NEWS_URL` | GitHub raw の `mb-cosme-news/main/state/trends` | 朝報の読み先 |
 | `CV_LLM` | cli | `cli`（claude CLI）/ `api`（Claude API） |
 | `CV_API_MODEL` / `CV_API_EFFORT` | claude-sonnet-5-5 / low | API のモデルと effort |
 | `CV_VOICE` | on | `off` で読み上げなし |

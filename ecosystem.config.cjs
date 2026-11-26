@@ -32,8 +32,10 @@ module.exports = {
         CV_BASE_PATH: "/ig-customer-voice",
         CV_LLM: "api",
         CV_VOICE: "off",
-        // ペルソナはリリースをまたいで残す。共有 = customer-panel 同梱を scripts/sync-personas.sh で配る / 自分用 = チームが画面で作る
+        // ペルソナはリリースをまたいで残す。共有 = customer-panel 同梱 / ブランド顧客 = sasaki の自分用のうち group 付き
+        // （どちらも scripts/sync-personas.sh で配る。画面からは読むだけ）/ 自分用 = チームが画面で作る
         CV_PERSONA_DIR: DATA_DIR + "/shared",
+        CV_BRAND_PERSONA_DIR: DATA_DIR + "/brand",
         CV_OWN_PERSONA_DIR: DATA_DIR + "/own",
       },
     },

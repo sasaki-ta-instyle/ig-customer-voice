@@ -1,7 +1,7 @@
 // 顧客ボイス — サーバ（この Mac のローカル版と、mb.instyle.group のチーム版を同じコードで動かす）
 //   ローカル: CV_LLM=cli（claude CLI）+ VOICEVOX で読み上げ、認証なし
 //   チーム版: CV_LLM=api（Claude API）・CV_VOICE=off（文字だけ）・CV_PASSWORD で入口に共通パスワード
-//   GET  /api/personas  ペルソナ一覧（共有 + 自分用）
+//   GET  /api/personas  ペルソナ一覧（ブランド顧客 → 自分用 → 共有の順）
 //   POST /api/personas/draft {description} → Markdown 下書き
 //   POST /api/personas  {markdown, originalSlug?} → 自分用に保存
 //   DELETE /api/personas/:slug → 自分用を _trash へ
@@ -16,8 +16,9 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { askCustomer, draftPersona, LLM } from "./lib/ask-claude.mjs";
-import { listPersonas, findPersona, readSchema, savePersona, deletePersona, validatePersona, SHARED_DIR, OWN_DIR } from "./lib/personas.mjs";
+import { listPersonas, findPersona, readSchema, savePersona, deletePersona, validatePersona, SHARED_DIR, OWN_DIR, BRAND_DIR } from "./lib/personas.mjs";
 import { synthesize, engineVersion } from "./lib/voicevox.mjs";
+import { newsItems, pickNews, newsBlock, NEWS_ENABLED } from "./lib/news.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.CV_PORT || process.env.PORT || 4780);
@@ -121,6 +122,20 @@ async function limited(fn) {
   }
 }
 
+/** 質問（と直前に聞いたこと）に近い朝報の記事。読めていないときは理由を返す（回答は止めない） */
+async function relatedNews(question, history) {
+  if (!NEWS_ENABLED) return { picked: [], status: { enabled: false } };
+  const { items, error } = await newsItems();
+  const lastAsked = history.filter((h) => h.role === "user").slice(-1).map((h) => h.text);
+  const picked = pickNews(items, [question, ...lastAsked].join(" "));
+  return { picked, status: { enabled: true, total: items.length, error } };
+}
+/** 回答で [市場: N3] と書いた記事だけを返す（画面でリンクにする） */
+function citedNews(picked, answers) {
+  const text = answers.flatMap((a) => a.marketing_note).join(" ");
+  return picked.filter((n) => new RegExp(`\\[市場[:：][^\\]]*\\b${n.id}\\b`).test(text)).map(({ id, date, media, title, url }) => ({ id, date, media, title, url }));
+}
+
 function normStyle(style) {
   return style === "zundamon" ? "zundamon" : "persona";
 }
@@ -158,7 +173,15 @@ async function askMajority(target, args, samples) {
   }
   const vote = tally(ok);
   const answer = ok.find((a) => vote.canon(normKey(a.choice_key)) === vote.counts[0].key);
-  return { ...answer, vote: { total: vote.total, counts: vote.counts, agreement: vote.agreement, failed } };
+  return { ...answer, stance: stanceOf(ok), vote: { total: vote.total, counts: vote.counts, agreement: vote.agreement, failed } };
+}
+
+/** 気持ちの向きは選んだものとは別に多数決。同数なら悪いほうを取る（主力顧客の離反を見落とさないため） */
+const STANCE_ORDER = ["negative", "conditional", "positive"];
+function stanceOf(answers) {
+  const n = Object.fromEntries(STANCE_ORDER.map((s) => [s, 0]));
+  for (const a of answers) n[a.stance]++;
+  return STANCE_ORDER.reduce((best, s) => (n[s] > n[best] ? s : best), STANCE_ORDER[0]);
 }
 
 /** パネル全体の集計。各人の多数決の答えを 1 票とし、人数と構成比の重み付き割合の両方を出す */
@@ -271,9 +294,11 @@ const server = http.createServer(async (req, res) => {
       if (!target) return send(res, 400, { error: `unknown persona: ${persona}` });
       const rules = await readFile(path.join(ROOT, "prompt.md"), "utf8");
       const startedAt = Date.now();
-      const r = await askMajority(target, { rules, history: sanitizeHistory(history), question: q, style: normStyle(style) }, samples);
-      console.log(`[ask] ${persona} ${Date.now() - startedAt}ms ${r.vote.counts.map((c) => `${c.label}=${c.n}`).join(" ")}`);
-      return send(res, 200, { ...r, tookMs: Date.now() - startedAt });
+      const hist = sanitizeHistory(history);
+      const { picked, status } = await relatedNews(q, hist);
+      const r = await askMajority(target, { rules, history: hist, question: q, style: normStyle(style), news: newsBlock(picked) }, samples);
+      console.log(`[ask] ${persona} ${Date.now() - startedAt}ms ${r.vote.counts.map((c) => `${c.label}=${c.n}`).join(" ")} stance=${r.stance}`);
+      return send(res, 200, { ...r, news: citedNews(picked, [r]), newsStatus: { ...status, picked: picked.length }, tookMs: Date.now() - startedAt });
     }
     if (req.method === "POST" && url.pathname === "/api/panel") {
       const { personas, question, histories, style, samples, weights } = await readJson(req);
@@ -289,9 +314,11 @@ const server = http.createServer(async (req, res) => {
       const rules = await readFile(path.join(ROOT, "prompt.md"), "utf8");
       const hist = histories && typeof histories === "object" ? histories : {};
       const startedAt = Date.now();
+      const { picked, status } = await relatedNews(q, []); // 全員に同じ記事を渡す（人ごとに市場の前提を変えない）
+      const news = newsBlock(picked);
       const settled = await Promise.allSettled(
         targets.map((t) =>
-          askMajority(t, { rules, history: sanitizeHistory(Object.hasOwn(hist, t.slug) ? hist[t.slug] : []), question: q, style: normStyle(style) }, samples)
+          askMajority(t, { rules, history: sanitizeHistory(Object.hasOwn(hist, t.slug) ? hist[t.slug] : []), question: q, style: normStyle(style), news }, samples)
         )
       );
       const results = [];
@@ -299,13 +326,13 @@ const server = http.createServer(async (req, res) => {
       settled.forEach((r, i) => {
         const t = targets[i];
         if (r.status === "fulfilled") {
-          results.push({ slug: t.slug, name: t.name, who: t.who, source: t.source, items: t.items, tentative: t.tentative, weight: w[t.slug], ...r.value });
+          results.push({ slug: t.slug, name: t.name, who: t.who, source: t.source, items: t.items, tentative: t.tentative, group: t.group, brand: t.brand, segment: t.segment, critical: t.critical, weight: w[t.slug], ...r.value });
         } else failures.push({ slug: t.slug, name: t.name, error: r.reason?.message ?? String(r.reason) });
       });
       if (results.length < PANEL_MIN) throw new Error(`回答できたのが ${results.length} 人だけでした: ${failures.map((f) => `${f.name}（${f.error}）`).join(" / ")}`);
       const summary = panelSummary(results);
       console.log(`[panel] ${results.length}人 ${Date.now() - startedAt}ms ${summary.counts.map((c) => `${c.label}=${c.people}人/${Math.round(c.share * 100)}%`).join(" ")}`);
-      return send(res, 200, { summary, results, failures, weighted: w.__weighted, tookMs: Date.now() - startedAt });
+      return send(res, 200, { summary, results, failures, weighted: w.__weighted, news: citedNews(picked, results), newsStatus: { ...status, picked: picked.length }, tookMs: Date.now() - startedAt });
     }
     if (req.method === "POST" && url.pathname === "/api/speak") {
       if (!VOICE) return send(res, 404, { error: "このサーバでは読み上げを使いません" });
@@ -321,5 +348,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`顧客ボイス: http://localhost:${PORT}${BASE}/  (回答: ${LLM} / 読み上げ: ${VOICE ? "on" : "off"} / パスワード: ${PASSWORD ? "あり" : "なし"})\n  共有ペルソナ: ${SHARED_DIR}\n  自分用ペルソナ: ${OWN_DIR}`);
+  console.log(`顧客ボイス: http://localhost:${PORT}${BASE}/  (回答: ${LLM} / 読み上げ: ${VOICE ? "on" : "off"} / パスワード: ${PASSWORD ? "あり" : "なし"})\n  共有ペルソナ: ${SHARED_DIR}\n  自分用ペルソナ: ${OWN_DIR}${BRAND_DIR ? `\n  配布ペルソナ: ${BRAND_DIR}` : ""}`);
 });
